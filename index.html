@@ -1,0 +1,251 @@
+# zyuudenndennryuu
+充電電流を計算してくれるツール
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ケーブル 充電電流計算ツール</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #eef2f5;
+      padding: 20px;
+    }
+    .container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      width: 600px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .summary {
+      width: 300px;
+      background: #fdfdfd;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .field {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: bold;
+    }
+    select, input {
+      width: 100%;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #3498db;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+    .result, .steps {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .summary-table {
+      font-family: sans-serif;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .summary-table th, .summary-table td {
+      padding: 8px;
+      border: 1px solid #ccc;
+      text-align: center;
+    }
+    .summary-table th {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>ケーブル充電電流計算ツール</h2>
+
+      <div class="field">
+        <label for="volt">電圧系:</label>
+        <select id="volt">
+          <option value="6600">6600 V</option>
+          <option value="3300">3300 V</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="freq">周波数:</label>
+        <select id="freq">
+          <option value="50">50 Hz</option>
+          <option value="60">60 Hz</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="sq">断面積 (mm²):</label>
+        <select id="sq">
+          <option value="22">22</option>
+          <option value="38">38</option>
+          <option value="60">60</option>
+          <option value="100">100</option>
+          <option value="150">150</option>
+          <option value="250">250</option>
+          <option value="325">325</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="length">長さ (m):</label>
+        <input id="length" type="number" placeholder="例: 50">
+      </div>
+
+      <button onclick="calculate()">計算する</button>
+
+      <div id="steps" class="steps" style="display:none;"></div>
+      <div id="result" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="summary">
+      <h3>必要機器まとめ</h3>
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>項目</th>
+            <th>値</th>
+          </tr>
+        </thead>
+        <tbody id="summary-body">
+          <tr><td>充電電流</td><td>-</td></tr>
+          <tr><td>トランス台数</td><td>-</td></tr>
+          <tr><td>リアクトル台数</td><td>-</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const capPerKm = {
+      22: 0.27,
+      38: 0.32,
+      60: 0.37,
+      100: 0.45,
+      150: 0.52,
+      250: 0.55,
+      325: 0.61
+    };
+
+    const TRANSFORMERS = {
+      '2kVA': { capacity: 2000, current: 167 },
+      '5kVA': { capacity: 5000, current: 417 }
+    };
+
+    const REACTORS = {
+      '2k': 167,
+      '5k': 417
+    };
+
+    function calculate() {
+      const Vline = Number(document.getElementById('volt').value);
+      const f = Number(document.getElementById('freq').value);
+      const sq = Number(document.getElementById('sq').value);
+      const Lm = Number(document.getElementById('length').value);
+      if (!Lm) {
+        alert('長さを正しく入力してください。');
+        return;
+      }
+
+      const CμFkm = capPerKm[sq];
+      const CμF = (CμFkm * Lm) / 1000; // μF
+      const ω = 2 * Math.PI * f;
+
+      const Vph = Vline === 6600 ? 10350 : 5175; // 相電圧（指定）
+      const I_A = ω * (CμF / 1e6) * Vph; // A
+      const I_mA = I_A * 1000;
+
+      const I_total = Math.round(I_mA * 3); // 三相合計 mA（四捨五入）
+
+      // トランス選定：どちらか1種のみ →できるだけ少ない台数 + リアクトル
+      const results = [];
+
+      for (const tName in TRANSFORMERS) {
+        const tCurrent = TRANSFORMERS[tName].current;
+        const tCount = Math.floor(I_total / tCurrent);
+        let remain = I_total - tCount * tCurrent;
+
+        let r5 = Math.floor(remain / REACTORS['5k']);
+        remain -= r5 * REACTORS['5k'];
+        let r2 = Math.ceil(remain / REACTORS['2k']);
+
+        const totalUnits = tCount + r5 + r2;
+        results.push({
+          transformer: tName,
+          tCount: tCount,
+          r2,
+          r5,
+          total: totalUnits
+        });
+      }
+
+      // 少ない構成を選択
+      results.sort((a, b) => a.total - b.total);
+      const best = results[0];
+
+      const steps = `
+● 入力データ
+  系統電圧: ${Vline} V, 周波数: ${f} Hz, 断面積: ${sq} mm², 長さ: ${Lm} m
+
+● 静電容量（1相）
+  C = ${CμFkm} × ${Lm} / 1000 = ${CμF.toFixed(3)} μF
+
+● 相電圧（指定値）
+  V_phase = ${Vph} V
+
+● 角周波数
+  ω = 2πf = ${ω.toFixed(1)} rad/s
+
+● 充電電流（1相）
+  I_phase = ω × C × V = ${I_A.toFixed(3)} A = ${(I_A*1000).toFixed(1)} mA
+
+● 三相合計電流
+  I_total = ${I_total} mA
+`;
+
+      document.getElementById('steps').textContent = steps;
+      document.getElementById('steps').style.display = 'block';
+      document.getElementById('result').textContent = `→ 三相合計の充電電流: ${I_total} mA`;
+      document.getElementById('result').style.display = 'block';
+
+      // Summary 表に表示
+      const summary = document.getElementById("summary-body");
+      summary.innerHTML = `
+        <tr><td>充電電流</td><td>${I_total} mA</td></tr>
+        <tr><td>${best.transformer} トランス</td><td>${best.tCount} 台</td></tr>
+        <tr><td>5kリアクトル</td><td>${best.r5} 台</td></tr>
+        <tr><td>2kリアクトル</td><td>${best.r2} 台</td></tr>
+      `;
+    }
+  </script>
+</body>
+</html>
